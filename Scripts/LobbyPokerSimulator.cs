@@ -57,6 +57,13 @@ public class LobbyPokerSimulator
             return state;  // Not enough players
         }
 
+        // Ensure dealer seat is on an active player
+        if (!activePlayers.Contains(dealerSeat))
+        {
+            dealerSeat = activePlayers[0];
+            state.dealerButtonSeat = dealerSeat;
+        }
+
         // Create seats
         for (int i = 0; i < table.MaxPlayers; i++)
         {

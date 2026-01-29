@@ -696,13 +696,17 @@ public class LobbyManager : MonoBehaviour
         // Update table registry with the complete state
         TableRegistry.Instance.UpdateTableState(table.TableId, fullState);
 
-        // Move dealer button for next hand
-        int nextDealer = (dealerSeat + 1) % table.MaxPlayers;
-        while (nextDealer < table.SeatedPlayerIds.Count)
+        // Move dealer button for next hand (rotate among occupied seats)
+        int nextDealer = dealerSeat;
+        int safety = 0;
+        do
         {
-            nextDealer++;
-            if (nextDealer >= table.MaxPlayers) nextDealer = 0;
+            nextDealer = (nextDealer + 1) % table.MaxPlayers;
+            safety++;
         }
+        while (safety <= table.MaxPlayers &&
+               (nextDealer >= fullState.seats.Count || !fullState.seats[nextDealer].isOccupied));
+
         tableDealerPositions[table.TableId] = nextDealer;
 
         // Update hand number
