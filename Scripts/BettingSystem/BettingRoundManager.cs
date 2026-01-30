@@ -28,6 +28,8 @@ public class BettingRoundManager : MonoBehaviour
     private int lastRaiserIndex = -1;          // Track who raised last
     private bool roundComplete = false;
 
+    public int CurrentBet => currentBet;
+
     /// <summary>
     /// Run a complete betting round
     /// </summary>
@@ -127,6 +129,7 @@ public class BettingRoundManager : MonoBehaviour
         {
             int seatIndex = activePlayers[actionIndex];
             PlayerSeat seat = tableManager.seats[seatIndex];
+            PlayerSeatStatus seatStatus = seat != null ? seat.GetComponent<PlayerSeatStatus>() : null;
 
             // SAFETY CHECK: Detect if same player is acting twice in a row (infinite loop bug!)
             if (lastActorSeatIndex == seatIndex && actionsThisRound > 0)
@@ -141,7 +144,24 @@ public class BettingRoundManager : MonoBehaviour
                 break;
             }
 
-            // Skip if folded or all-in
+            // Skip if folded, all-in, empty, or waiting for next hand
+            if (seat == null || !seat.IsSeated)
+            {
+                hasFolded[seatIndex] = true;
+                hasActed[seatIndex] = true;
+                actionIndex = (actionIndex + 1) % activePlayers.Count;
+                continue;
+            }
+
+            if (seatStatus != null && seatStatus.isWaitingForNextHand)
+            {
+                UnityEngine.Debug.Log($"[Betting] Seat {seatIndex} waiting for next hand - skipping action");
+                hasFolded[seatIndex] = true;
+                hasActed[seatIndex] = true;
+                actionIndex = (actionIndex + 1) % activePlayers.Count;
+                continue;
+            }
+
             if (hasFolded[seatIndex] || seat.ChipCount == 0)
             {
                 // Move CLOCKWISE (increment with your array order)
