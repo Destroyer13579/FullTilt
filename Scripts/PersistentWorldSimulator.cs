@@ -28,6 +28,9 @@ public class PersistentWorldSimulator : MonoBehaviour
     }
 
     [Header("Simulation Settings")]
+    [Tooltip("Base hand duration in seconds (adjusted by player count)")]
+    public float baseHandDuration = 30f;
+
     [Tooltip("How often to check for players joining/leaving tables (seconds)")]
     public float dynamicSeatFillingInterval = 45f;
 
@@ -43,7 +46,7 @@ public class PersistentWorldSimulator : MonoBehaviour
     public float timeSinceLastCleanup = 0f;
     public float timeSinceLastSave = 0f;
 
-    private LobbyPokerSimulator pokerSimulator;
+    private PersistentWorldHandSimulation handSimulation;
 
     void Awake()
     {
@@ -70,29 +73,17 @@ public class PersistentWorldSimulator : MonoBehaviour
             return;
         }
 
-        UnityEngine.Debug.Log("[PersistentWorld] ★ DISABLED - Using lobby-based simulation instead");
-        UnityEngine.Debug.Log("[PersistentWorld] ★ This prevents conflicts between lobby and persistent world");
-
-        // TODO: Re-enable when we have proper TableRegistry sync
-        // For now, let the lobby handle everything
-
-        isRunning = false;
-        return;
-
-        /*
         UnityEngine.Debug.Log("[PersistentWorld] ★ Starting continuous simulation across all scenes");
         
-        // Initialize poker simulator
-        if (pokerSimulator == null)
+        if (handSimulation == null)
         {
-            pokerSimulator = new LobbyPokerSimulator();
+            handSimulation = new PersistentWorldHandSimulation(baseHandDuration);
         }
 
         isRunning = true;
         StartCoroutine(PersistentSimulationLoop());
         
         UnityEngine.Debug.Log("[PersistentWorld] ✓ Simulation running - will continue even when player is at table!");
-        */
     }
 
     /// <summary>
@@ -100,18 +91,25 @@ public class PersistentWorldSimulator : MonoBehaviour
     /// </summary>
     IEnumerator PersistentSimulationLoop()
     {
+        const float tickSeconds = 1f;
         while (isRunning)
         {
             // Update timers
-            timeSinceLastFill += Time.deltaTime;
-            timeSinceLastCleanup += Time.deltaTime;
-            timeSinceLastSave += Time.deltaTime;
+            timeSinceLastFill += tickSeconds;
+            timeSinceLastCleanup += tickSeconds;
+            timeSinceLastSave += tickSeconds;
 
             // Dynamic seat filling
             if (timeSinceLastFill >= dynamicSeatFillingInterval)
             {
                 DynamicSeatFilling();
                 timeSinceLastFill = 0f;
+            }
+
+            if (handSimulation != null)
+            {
+                handSimulation.BaseHandDuration = baseHandDuration;
+                handSimulation.Tick(tickSeconds);
             }
 
             // Cleanup broke players
@@ -128,9 +126,10 @@ public class PersistentWorldSimulator : MonoBehaviour
                 timeSinceLastSave = 0f;
             }
 
-            yield return new WaitForSeconds(1f); // Check every second
+            yield return new WaitForSeconds(tickSeconds); // Check every second
         }
     }
+
 
     /// <summary>
     /// Fill empty seats at tables (runs continuously)
