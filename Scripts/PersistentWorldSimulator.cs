@@ -46,6 +46,8 @@ public class PersistentWorldSimulator : MonoBehaviour
     public float timeSinceLastCleanup = 0f;
     public float timeSinceLastSave = 0f;
 
+    // NOTE: Hand simulation lives in PersistentWorldHandSimulation.
+    // Keep only this field here to avoid merge-time duplicate method errors.
     private PersistentWorldHandSimulation handSimulation;
 
     void Awake()
@@ -127,50 +129,6 @@ public class PersistentWorldSimulator : MonoBehaviour
             }
 
             yield return new WaitForSeconds(tickSeconds); // Check every second
-        }
-
-        // Rotate dealer to next occupied seat
-        int nextDealer = dealerSeat;
-        int safety = 0;
-        do
-        {
-            nextDealer = (nextDealer + 1) % tableInfo.maxSeats;
-            safety++;
-        }
-        while (safety <= tableInfo.maxSeats &&
-               (nextDealer >= newState.seats.Count || !newState.seats[nextDealer].isOccupied));
-
-        tableDealerPositions[tableInfo.tableId] = nextDealer;
-        tableHandNumbers[tableInfo.tableId] = table.CurrentHandNumber + 1;
-    }
-
-    TableData BuildTableDataFromRegistry(PokerTableInfo tableInfo)
-    {
-        TableData table = new TableData(tableInfo.tableId, tableInfo.stake, tableInfo.maxSeats)
-        {
-            TableId = tableInfo.tableId
-        };
-
-        table.SeatedPlayerIds = new List<string>(new string[tableInfo.maxSeats]);
-        table.CurrentPlayers = 0;
-
-        if (tableInfo.currentState != null)
-        {
-            for (int i = 0; i < tableInfo.currentState.seats.Count && i < tableInfo.maxSeats; i++)
-            {
-                var seat = tableInfo.currentState.seats[i];
-                if (!seat.isOccupied || string.IsNullOrEmpty(seat.playerName))
-                {
-                    continue;
-                }
-
-                var player = AIPlayerManager.Instance.AllPlayers.FirstOrDefault(p => p.PlayerName == seat.playerName);
-                if (player != null)
-                {
-                    table.SeatedPlayerIds[i] = player.PlayerId;
-                    table.CurrentPlayers++;
-                }
-            }
         }
 
         return table;
