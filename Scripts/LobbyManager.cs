@@ -45,6 +45,7 @@ public class LobbyManager : MonoBehaviour
     private static List<TableData> allTables = new List<TableData>();
     private Dictionary<string, TableRowUI> tableRows = new Dictionary<string, TableRowUI>();
     private TableData selectedTable = null;
+    private static bool lobbyInitialized = false;
 
     // ★ Persistence flag - prevent re-initialization
 
@@ -70,8 +71,16 @@ public class LobbyManager : MonoBehaviour
     void Start()
     {
         UpdatePlayerInfo();
-        InitializeLobby();
         SetupActionButtons();
+
+        if (lobbyInitialized)
+        {
+            SyncWithExistingState();
+            return;
+        }
+
+        InitializeLobby();
+        lobbyInitialized = true;
     }
 
     void SetupActionButtons()
@@ -152,9 +161,11 @@ public class LobbyManager : MonoBehaviour
             UnityEngine.Debug.LogWarning("[Lobby] No avatar database, defaulting to 6 avatars");
         }
 
-        // ★ ALWAYS Initialize AI Player Manager
-        // This clears CurrentTableId for all players (unseats them)
-        AIPlayerManager.Instance.Initialize();
+        // ★ Initialize AI Player Manager only once to preserve persistent state
+        if (!AIPlayerManager.Instance.IsInitialized)
+        {
+            AIPlayerManager.Instance.Initialize();
+        }
 
         // ★ Initialize poker simulator
         pokerSimulator = new LobbyPokerSimulator();
@@ -171,8 +182,12 @@ public class LobbyManager : MonoBehaviour
             UnityEngine.Debug.Log($"[Lobby] Using existing {allTables.Count} tables");
         }
 
-        // ★ ALWAYS populate (players were unseated by Initialize())
-        PopulateTablesWithAISmartly();
+        // ★ Populate only if tables are empty (avoid wiping persistent state)
+        bool hasSeatedPlayers = allTables.Any(t => t.CurrentPlayers > 0);
+        if (!hasSeatedPlayers)
+        {
+            PopulateTablesWithAISmartly();
+        }
         RefreshTableList();
 
         // ★ Start the lobby's simulation loop (handles TimeSinceLastHand and hand simulation)
@@ -219,6 +234,7 @@ public class LobbyManager : MonoBehaviour
         // Just update the display
 
         RefreshTableList();
+        UpdateTableCountsFromRegistry();
         UpdatePlayerCounts();
 
         UnityEngine.Debug.Log($"[Lobby] ✓ Synced - displaying {allTables.Count} existing tables");
@@ -696,13 +712,17 @@ public class LobbyManager : MonoBehaviour
         // Update table registry with the complete state
         TableRegistry.Instance.UpdateTableState(table.TableId, fullState);
 
-        // Move dealer button for next hand
-        int nextDealer = (dealerSeat + 1) % table.MaxPlayers;
-        while (nextDealer < table.SeatedPlayerIds.Count)
+        // Move dealer button for next hand (rotate among occupied seats)
+        int nextDealer = dealerSeat;
+        int safety = 0;
+        do
         {
-            nextDealer++;
-            if (nextDealer >= table.MaxPlayers) nextDealer = 0;
+            nextDealer = (nextDealer + 1) % table.MaxPlayers;
+            safety++;
         }
+        while (safety <= table.MaxPlayers &&
+               (nextDealer >= fullState.seats.Count || !fullState.seats[nextDealer].isOccupied));
+
         tableDealerPositions[table.TableId] = nextDealer;
 
         // Update hand number
@@ -974,11 +994,26 @@ public class LobbyManager : MonoBehaviour
         PlayerPrefs.SetString("TablePlayerIds", playerIds);
         PlayerPrefs.SetInt("TableMaxPlayers", selectedTable.MaxPlayers);
 
-        // ★★★ Check if joining mid-hand ★★★
-        float handTime = handDuration / Mathf.Max(2, selectedTable.CurrentPlayers);
-        bool isHandInProgress = selectedTable.CurrentPlayers >= 2 &&
+        // ★★★ Check if joining mid-hand (use TableRegistry as source of truth) ★★★
+        bool isHandInProgress = false;
+        float handTime = 0f;
+        TableState registryState = TableRegistry.Instance != null
+            ? TableRegistry.Instance.GetTableState(selectedTable.TableId)
+            : null;
+
+        if (registryState != null)
+        {
+            isHandInProgress = registryState.currentStreet != "BetweenHands";
+            UnityEngine.Debug.Log($"[Join] Registry street: {registryState.currentStreet}");
+        }
+        else
+        {
+            // Fallback to local timing if registry not available
+            handTime = handDuration / Mathf.Max(2, selectedTable.CurrentPlayers);
+            isHandInProgress = selectedTable.CurrentPlayers >= 2 &&
                                selectedTable.TimeSinceLastHand > 0 &&
                                selectedTable.TimeSinceLastHand < handTime;
+        }
         PlayerPrefs.SetInt("JoiningMidHand", isHandInProgress ? 1 : 0);
 
         // ★★★ DEBUG LOGS
