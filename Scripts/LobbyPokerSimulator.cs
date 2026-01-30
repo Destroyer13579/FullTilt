@@ -42,9 +42,19 @@ public class LobbyPokerSimulator
 
         // Get active players
         List<int> activePlayers = new List<int>();
-        for (int i = 0; i < table.SeatedPlayerIds.Count; i++)
+        for (int i = 0; i < table.MaxPlayers; i++)
         {
+            if (i >= table.SeatedPlayerIds.Count)
+            {
+                continue;
+            }
+
             var playerId = table.SeatedPlayerIds[i];
+            if (string.IsNullOrEmpty(playerId))
+            {
+                continue;
+            }
+
             var aiPlayer = AIPlayerManager.Instance.GetPlayer(playerId);
             if (aiPlayer != null && aiPlayer.ChipsAtTable > 0)
             {
@@ -67,7 +77,8 @@ public class LobbyPokerSimulator
         // Create seats
         for (int i = 0; i < table.MaxPlayers; i++)
         {
-            bool isOccupied = i < table.SeatedPlayerIds.Count;
+            bool isOccupied = i < table.SeatedPlayerIds.Count &&
+                              !string.IsNullOrEmpty(table.SeatedPlayerIds[i]);
             SeatSnapshot seat = new SeatSnapshot
             {
                 seatIndex = i,

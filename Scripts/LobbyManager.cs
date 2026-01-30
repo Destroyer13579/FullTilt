@@ -190,12 +190,15 @@ public class LobbyManager : MonoBehaviour
         }
         RefreshTableList();
 
-        // ★ Start the lobby's simulation loop (handles TimeSinceLastHand and hand simulation)
-        StartCoroutine(SimulationLoop());
-
         // ★★★ START PERSISTENT WORLD SIMULATOR ★★★
         // This runs FOREVER across all scenes
         PersistentWorldSimulator.Instance.StartSimulation();
+
+        // ★ Start the lobby's simulation loop only if persistent world is not running
+        if (!PersistentWorldSimulator.Instance.isRunning)
+        {
+            StartCoroutine(SimulationLoop());
+        }
 
         // ★★★ START CONTINUOUS LOBBY REFRESH ★★★
         // Updates every 2 seconds even when simulation is running
@@ -246,8 +249,11 @@ public class LobbyManager : MonoBehaviour
             InvokeRepeating(nameof(CleanupBrokePlayers), 5f, 10f);
             InvokeRepeating(nameof(SaveAIState), 60f, 60f);
 
-            // Also restart simulation loop
-            StartCoroutine(SimulationLoop());
+            // Also restart simulation loop if persistent world is not running
+            if (!PersistentWorldSimulator.Instance.isRunning)
+            {
+                StartCoroutine(SimulationLoop());
+            }
         }
     }
 
@@ -1203,10 +1209,6 @@ public class LobbyManager : MonoBehaviour
     /// </summary>
     IEnumerator ContinuousLobbyRefresh()
     {
-        UnityEngine.Debug.Log("[Lobby] ★ Continuous refresh DISABLED - prevents count resets");
-        yield break;  // Exit immediately
-
-        /*
         UnityEngine.Debug.Log("[Lobby] ★ Starting continuous refresh - lobby will stay alive!");
         
         while (true)
@@ -1219,7 +1221,6 @@ public class LobbyManager : MonoBehaviour
             // Refresh UI
             RefreshTableList();
         }
-        */
     }
 
     /// <summary>
@@ -1228,12 +1229,6 @@ public class LobbyManager : MonoBehaviour
     /// </summary>
     void UpdateTableCountsFromRegistry()
     {
-        // ★ DISABLED FOR NOW - Causes tables to go to 0/9
-        // The issue: TableRegistry isn't properly synced with lobby's initial population
-        // Re-enable when we have proper sync
-        return;
-
-        /*
         var registryTables = TableRegistry.Instance.GetAllTables();
         
         foreach (var regTable in registryTables)
@@ -1261,9 +1256,17 @@ public class LobbyManager : MonoBehaviour
                             if (player != null)
                             {
                                 lobbyTable.SeatedPlayerIds.Add(player.PlayerId);
+                                player.UpdateChips(seat.chipCount);
+                                if (string.IsNullOrEmpty(player.CurrentTableId))
+                                {
+                                    player.CurrentTableId = regTable.tableId;
+                                }
                             }
                         }
                     }
+
+                    lobbyTable.AveragePot = tableState.totalPot;
+                    lobbyTable.CurrentHandNumber = tableState.handNumber;
                 }
                 
                 if (oldCount != lobbyTable.CurrentPlayers)
@@ -1273,7 +1276,6 @@ public class LobbyManager : MonoBehaviour
                 }
             }
         }
-        */
     }
 
     /// <summary>
