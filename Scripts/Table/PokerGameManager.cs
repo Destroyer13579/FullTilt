@@ -125,6 +125,15 @@ public class PokerGameManager : MonoBehaviour
         savedTableId = PlayerPrefs.GetString("SelectedTableId", "");
         joiningMidHand = PlayerPrefs.GetInt("JoiningMidHand", 0) == 1;
 
+        if (!string.IsNullOrEmpty(savedTableId))
+        {
+            TableState registryState = TableRegistry.Instance.GetTableState(savedTableId);
+            if (registryState != null && registryState.currentStreet != "BetweenHands")
+            {
+                joiningMidHand = true;
+            }
+        }
+
         UnityEngine.Debug.Log($"[PokerGameManager] Saved table ID: '{savedTableId}'");
 
         if (joiningMidHand)
