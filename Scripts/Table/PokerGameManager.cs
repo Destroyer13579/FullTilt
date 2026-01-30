@@ -494,6 +494,25 @@ public class PokerGameManager : MonoBehaviour
         {
             joiner.ProcessWaitingPlayers();
         }
+        else
+        {
+            // Fallback: clear waiting flags even if TableJoiner isn't present
+            foreach (var seat in tableManager.seats)
+            {
+                if (seat == null || !seat.IsSeated)
+                {
+                    continue;
+                }
+
+                PlayerSeatStatus status = seat.GetComponent<PlayerSeatStatus>();
+                if (status != null && status.isWaitingForNextHand)
+                {
+                    status.isWaitingForNextHand = false;
+                    seat.UpdateChips(seat.ChipCount);
+                    UnityEngine.Debug.Log($"[PokerGameManager] {seat.PlayerName} no longer waiting - will be dealt in");
+                }
+            }
+        }
 
         // Reset
         deck.Reset();

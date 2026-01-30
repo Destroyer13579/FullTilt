@@ -284,6 +284,19 @@ public class TableManager : MonoBehaviour
             true
         );
 
+        PokerGameManager gameManager = FindObjectOfType<PokerGameManager>();
+        bool handInProgress = gameManager != null && gameManager.IsHandInProgress;
+        if (handInProgress)
+        {
+            PlayerSeatStatus status = pendingSeat.GetComponent<PlayerSeatStatus>();
+            if (status != null)
+            {
+                status.isWaitingForNextHand = true;
+            }
+
+            UnityEngine.Debug.Log($"[TableManager] {player.DisplayName} joined mid-hand - waiting for next hand.");
+        }
+
         localPlayerSeatIndex = pendingSeat.seatIndex;
 
         if (seatPositionManager != null)
