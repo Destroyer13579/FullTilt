@@ -85,6 +85,8 @@ public class PokerGameManager : MonoBehaviour
     private bool loadedFromSnapshot = false;  // ★ Skip dealing cards if loaded from snapshot
     private bool bettingCompleteFromSnapshot = false;  // ★ Skip betting round if complete
 
+    private const float minBetweenHandsDelay = 0.5f;
+
     void Start()
     {
         UnityEngine.Debug.Log("[PokerGameManager] START - Script initialized!");
@@ -398,6 +400,16 @@ public class PokerGameManager : MonoBehaviour
 
     IEnumerator WaitForPlayers()
     {
+        // If joining between hands, sync dealer/blinds and use a natural-looking delay.
+        if (!joiningMidHand && !string.IsNullOrEmpty(savedTableId))
+        {
+            TableState snapshot = TableRegistry.Instance.GetTableState(savedTableId);
+            if (snapshot != null && snapshot.currentStreet == "BetweenHands")
+            {
+                ApplyBetweenHandsSnapshot(snapshot);
+            }
+        }
+
         // ★★★ CHECK IF JOINING MID-HAND FIRST (before waiting) ★★★
         if (joiningMidHand)
         {
@@ -478,7 +490,17 @@ public class PokerGameManager : MonoBehaviour
 
         if (autoStartHands)
         {
-            yield return new WaitForSeconds(2f); // Brief delay before starting
+            float delay = betweenHandsDelay;
+            if (!joiningMidHand && !string.IsNullOrEmpty(savedTableId))
+            {
+                TableState snapshot = TableRegistry.Instance.GetTableState(savedTableId);
+                if (snapshot != null && snapshot.currentStreet == "BetweenHands")
+                {
+                    delay = GetBetweenHandsDelay(snapshot);
+                }
+            }
+
+            yield return new WaitForSeconds(delay); // Natural delay before starting
             currentState = GameState.StartingHand;
         }
     }
@@ -619,6 +641,33 @@ public class PokerGameManager : MonoBehaviour
 
         yield return new WaitForSeconds(0.5f);
         currentState = GameState.PostingBlinds;
+    }
+
+    private void ApplyBetweenHandsSnapshot(TableState snapshot)
+    {
+        dealerSeatIndex = snapshot.dealerButtonSeat;
+        smallBlindSeatIndex = snapshot.smallBlindSeat;
+        bigBlindSeatIndex = snapshot.bigBlindSeat;
+
+        if (dealerButtonImage != null && dealerButtonPositions != null &&
+            dealerSeatIndex >= 0 && dealerSeatIndex < dealerButtonPositions.Count)
+        {
+            dealerButtonImage.gameObject.SetActive(true);
+            dealerButtonImage.transform.position = dealerButtonPositions[dealerSeatIndex].position;
+        }
+
+        UnityEngine.Debug.Log($"[PokerGameManager] Synced between-hands dealer button to seat {dealerSeatIndex}");
+    }
+
+    private float GetBetweenHandsDelay(TableState snapshot)
+    {
+        int seed = snapshot.handNumber;
+        seed = (seed * 31) + snapshot.dealerButtonSeat;
+        seed = (seed * 17) + snapshot.smallBlindSeat;
+        seed = (seed * 13) + snapshot.bigBlindSeat;
+
+        float normalized = Mathf.Abs(seed % 1000) / 1000f;
+        return Mathf.Lerp(minBetweenHandsDelay, betweenHandsDelay, normalized);
     }
 
     void MoveDealer()
