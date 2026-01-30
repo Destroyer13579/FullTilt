@@ -130,6 +130,8 @@ public class PersistentWorldSimulator : MonoBehaviour
 
             yield return new WaitForSeconds(tickSeconds); // Check every second
         }
+
+        return table;
     }
 
 
