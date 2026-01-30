@@ -64,6 +64,12 @@ public class TableManager : MonoBehaviour
             tableId = lobbyTableId;
             tableName = lobbyTableName;
 
+            PokerTableInfo tableInfo = TableRegistry.Instance.GetTableInfo(tableId);
+            if (tableInfo != null)
+            {
+                tableInfo.isActivelyRendered = true;
+            }
+
             if (tableNameText != null)
                 tableNameText.text = tableName;
 
@@ -324,6 +330,15 @@ public class TableManager : MonoBehaviour
 
     public void LeaveTable()
     {
+        if (!string.IsNullOrEmpty(tableId))
+        {
+            PokerTableInfo tableInfo = TableRegistry.Instance.GetTableInfo(tableId);
+            if (tableInfo != null)
+            {
+                tableInfo.isActivelyRendered = false;
+            }
+        }
+
         if (localPlayerSeatIndex >= 0 && localPlayerSeatIndex < seats.Count)
         {
             int chipsToReturn = seats[localPlayerSeatIndex].ChipCount;

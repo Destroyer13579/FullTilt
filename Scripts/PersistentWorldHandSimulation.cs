@@ -22,6 +22,11 @@ public class PersistentWorldHandSimulation
         var allTables = TableRegistry.Instance.GetAllTables();
         foreach (var tableInfo in allTables)
         {
+            if (tableInfo.isActivelyRendered)
+            {
+                continue;
+            }
+
             int occupiedSeats = tableInfo.OccupiedSeats;
             if (occupiedSeats < 2)
             {
