@@ -46,8 +46,8 @@ public class PersistentWorldHandSimulation
 
     private void SimulateHandForTable(PokerTableInfo tableInfo)
     {
-        TableData table = BuildTableDataFromRegistry(tableInfo);
-        if (table.CurrentPlayers < 2)
+        TableData tableData = BuildTableDataFromRegistry(tableInfo);
+        if (tableData.CurrentPlayers < 2)
         {
             return;
         }
@@ -63,9 +63,9 @@ public class PersistentWorldHandSimulation
         }
 
         int dealerSeat = tableDealerPositions[tableInfo.tableId];
-        table.CurrentHandNumber = tableHandNumbers[tableInfo.tableId];
+        tableData.CurrentHandNumber = tableHandNumbers[tableInfo.tableId];
 
-        TableState newState = pokerSimulator.SimulateHand(table, table.CurrentHandNumber, dealerSeat);
+        TableState newState = pokerSimulator.SimulateHand(tableData, tableData.CurrentHandNumber, dealerSeat);
         TableRegistry.Instance.UpdateTableState(tableInfo.tableId, newState);
 
         foreach (var seat in newState.seats)
@@ -97,18 +97,18 @@ public class PersistentWorldHandSimulation
                (nextDealer >= newState.seats.Count || !newState.seats[nextDealer].isOccupied));
 
         tableDealerPositions[tableInfo.tableId] = nextDealer;
-        tableHandNumbers[tableInfo.tableId] = table.CurrentHandNumber + 1;
+        tableHandNumbers[tableInfo.tableId] = tableData.CurrentHandNumber + 1;
     }
 
     private TableData BuildTableDataFromRegistry(PokerTableInfo tableInfo)
     {
-        TableData table = new TableData(tableInfo.tableId, tableInfo.stake, tableInfo.maxSeats)
+        TableData tableData = new TableData(tableInfo.tableId, tableInfo.stake, tableInfo.maxSeats)
         {
             TableId = tableInfo.tableId
         };
 
-        table.SeatedPlayerIds = new List<string>(new string[tableInfo.maxSeats]);
-        table.CurrentPlayers = 0;
+        tableData.SeatedPlayerIds = new List<string>(new string[tableInfo.maxSeats]);
+        tableData.CurrentPlayers = 0;
 
         if (tableInfo.currentState != null)
         {
@@ -123,12 +123,12 @@ public class PersistentWorldHandSimulation
                 var player = AIPlayerManager.Instance.AllPlayers.FirstOrDefault(p => p.PlayerName == seat.playerName);
                 if (player != null)
                 {
-                    table.SeatedPlayerIds[i] = player.PlayerId;
-                    table.CurrentPlayers++;
+                    tableData.SeatedPlayerIds[i] = player.PlayerId;
+                    tableData.CurrentPlayers++;
                 }
             }
         }
 
-        return table;
+        return tableData;
     }
 }
