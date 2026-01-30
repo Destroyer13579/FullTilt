@@ -64,6 +64,13 @@ public class TableManager : MonoBehaviour
             tableId = lobbyTableId;
             tableName = lobbyTableName;
 
+            PokerTableInfo tableInfo = TableRegistry.Instance.GetTableInfo(tableId);
+            if (tableInfo != null)
+            {
+                tableInfo.isActivelyRendered = true;
+                tableInfo.lastRenderedRealtime = Time.realtimeSinceStartup;
+            }
+
             if (tableNameText != null)
                 tableNameText.text = tableName;
 
@@ -284,6 +291,19 @@ public class TableManager : MonoBehaviour
             true
         );
 
+        PokerGameManager gameManager = FindObjectOfType<PokerGameManager>();
+        bool handInProgress = gameManager != null && gameManager.IsHandInProgress;
+        if (handInProgress)
+        {
+            PlayerSeatStatus status = pendingSeat.GetComponent<PlayerSeatStatus>();
+            if (status != null)
+            {
+                status.isWaitingForNextHand = true;
+            }
+
+            UnityEngine.Debug.Log($"[TableManager] {player.DisplayName} joined mid-hand - waiting for next hand.");
+        }
+
         localPlayerSeatIndex = pendingSeat.seatIndex;
 
         if (seatPositionManager != null)
@@ -311,6 +331,16 @@ public class TableManager : MonoBehaviour
 
     public void LeaveTable()
     {
+        if (!string.IsNullOrEmpty(tableId))
+        {
+            PokerTableInfo tableInfo = TableRegistry.Instance.GetTableInfo(tableId);
+            if (tableInfo != null)
+            {
+                tableInfo.isActivelyRendered = false;
+                tableInfo.lastRenderedRealtime = Time.realtimeSinceStartup;
+            }
+        }
+
         if (localPlayerSeatIndex >= 0 && localPlayerSeatIndex < seats.Count)
         {
             int chipsToReturn = seats[localPlayerSeatIndex].ChipCount;
