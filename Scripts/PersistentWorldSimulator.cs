@@ -95,12 +95,13 @@ public class PersistentWorldSimulator : MonoBehaviour
     /// </summary>
     IEnumerator PersistentSimulationLoop()
     {
+        const float tickSeconds = 1f;
         while (isRunning)
         {
             // Update timers
-            timeSinceLastFill += Time.deltaTime;
-            timeSinceLastCleanup += Time.deltaTime;
-            timeSinceLastSave += Time.deltaTime;
+            timeSinceLastFill += tickSeconds;
+            timeSinceLastCleanup += tickSeconds;
+            timeSinceLastSave += tickSeconds;
 
             // Dynamic seat filling
             if (timeSinceLastFill >= dynamicSeatFillingInterval)
@@ -125,8 +126,130 @@ public class PersistentWorldSimulator : MonoBehaviour
                 timeSinceLastSave = 0f;
             }
 
-            yield return new WaitForSeconds(1f); // Check every second
+            yield return new WaitForSeconds(tickSeconds); // Check every second
         }
+    }
+
+    void SimulateHandsTick(float deltaSeconds)
+    {
+        var allTables = TableRegistry.Instance.GetAllTables();
+        foreach (var tableInfo in allTables)
+        {
+            int occupiedSeats = tableInfo.OccupiedSeats;
+            if (occupiedSeats < 2)
+            {
+                continue;
+            }
+
+            if (!tableHandTimers.ContainsKey(tableInfo.tableId))
+            {
+                tableHandTimers[tableInfo.tableId] = 0f;
+            }
+
+            float handTime = baseHandDuration / Mathf.Max(2, occupiedSeats);
+            tableHandTimers[tableInfo.tableId] += deltaSeconds;
+
+            if (tableHandTimers[tableInfo.tableId] >= handTime)
+            {
+                tableHandTimers[tableInfo.tableId] = 0f;
+                SimulateHandForTable(tableInfo);
+            }
+        }
+    }
+
+    void SimulateHandForTable(PokerTableInfo tableInfo)
+    {
+        if (pokerSimulator == null)
+        {
+            pokerSimulator = new LobbyPokerSimulator();
+        }
+
+        TableData table = BuildTableDataFromRegistry(tableInfo);
+        if (table.CurrentPlayers < 2)
+        {
+            return;
+        }
+
+        if (!tableDealerPositions.ContainsKey(tableInfo.tableId))
+        {
+            tableDealerPositions[tableInfo.tableId] = 0;
+        }
+
+        if (!tableHandNumbers.ContainsKey(tableInfo.tableId))
+        {
+            tableHandNumbers[tableInfo.tableId] = tableInfo.currentState != null ? tableInfo.currentState.handNumber : 0;
+        }
+
+        int dealerSeat = tableDealerPositions[tableInfo.tableId];
+        table.CurrentHandNumber = tableHandNumbers[tableInfo.tableId];
+
+        TableState newState = pokerSimulator.SimulateHand(table, table.CurrentHandNumber, dealerSeat);
+        TableRegistry.Instance.UpdateTableState(tableInfo.tableId, newState);
+
+        // Update AI player chips from snapshot
+        foreach (var seat in newState.seats)
+        {
+            if (!seat.isOccupied || string.IsNullOrEmpty(seat.playerName))
+            {
+                continue;
+            }
+
+            var player = AIPlayerManager.Instance.AllPlayers.FirstOrDefault(p => p.PlayerName == seat.playerName);
+            if (player != null)
+            {
+                player.UpdateChips(seat.chipCount);
+                if (string.IsNullOrEmpty(player.CurrentTableId))
+                {
+                    player.CurrentTableId = tableInfo.tableId;
+                }
+            }
+        }
+
+        // Rotate dealer to next occupied seat
+        int nextDealer = dealerSeat;
+        int safety = 0;
+        do
+        {
+            nextDealer = (nextDealer + 1) % tableInfo.maxSeats;
+            safety++;
+        }
+        while (safety <= tableInfo.maxSeats &&
+               (nextDealer >= newState.seats.Count || !newState.seats[nextDealer].isOccupied));
+
+        tableDealerPositions[tableInfo.tableId] = nextDealer;
+        tableHandNumbers[tableInfo.tableId] = table.CurrentHandNumber + 1;
+    }
+
+    TableData BuildTableDataFromRegistry(PokerTableInfo tableInfo)
+    {
+        TableData table = new TableData(tableInfo.tableId, tableInfo.stake, tableInfo.maxSeats)
+        {
+            TableId = tableInfo.tableId
+        };
+
+        table.SeatedPlayerIds = new List<string>(new string[tableInfo.maxSeats]);
+        table.CurrentPlayers = 0;
+
+        if (tableInfo.currentState != null)
+        {
+            for (int i = 0; i < tableInfo.currentState.seats.Count && i < tableInfo.maxSeats; i++)
+            {
+                var seat = tableInfo.currentState.seats[i];
+                if (!seat.isOccupied || string.IsNullOrEmpty(seat.playerName))
+                {
+                    continue;
+                }
+
+                var player = AIPlayerManager.Instance.AllPlayers.FirstOrDefault(p => p.PlayerName == seat.playerName);
+                if (player != null)
+                {
+                    table.SeatedPlayerIds[i] = player.PlayerId;
+                    table.CurrentPlayers++;
+                }
+            }
+        }
+
+        return table;
     }
 
     void SimulateHandsTick(float deltaSeconds)
