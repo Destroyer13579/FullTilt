@@ -294,6 +294,7 @@ public class PokerTableInfo
     // Is this table currently being rendered in Unity?
     // (false = running in background, true = player is viewing it)
     public bool isActivelyRendered;
+    public float lastRenderedRealtime;
 
     // Timestamps
     public DateTime createdTime;

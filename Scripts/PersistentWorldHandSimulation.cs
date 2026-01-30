@@ -19,10 +19,16 @@ public class PersistentWorldHandSimulation
 
     public void Tick(float deltaSeconds)
     {
+        float now = UnityEngine.Time.realtimeSinceStartup;
         var allTables = TableRegistry.Instance.GetAllTables();
         foreach (var tableInfo in allTables)
         {
             if (tableInfo.isActivelyRendered)
+            {
+                continue;
+            }
+
+            if (tableInfo.lastRenderedRealtime > 0f && now - tableInfo.lastRenderedRealtime < BaseHandDuration)
             {
                 continue;
             }

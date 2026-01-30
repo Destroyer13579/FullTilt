@@ -68,6 +68,7 @@ public class TableManager : MonoBehaviour
             if (tableInfo != null)
             {
                 tableInfo.isActivelyRendered = true;
+                tableInfo.lastRenderedRealtime = Time.realtimeSinceStartup;
             }
 
             if (tableNameText != null)
@@ -336,6 +337,7 @@ public class TableManager : MonoBehaviour
             if (tableInfo != null)
             {
                 tableInfo.isActivelyRendered = false;
+                tableInfo.lastRenderedRealtime = Time.realtimeSinceStartup;
             }
         }
 
