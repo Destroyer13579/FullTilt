@@ -151,6 +151,12 @@ public class PersistentWorldSimulator : MonoBehaviour
                 continue;
             }
 
+            var tableState = TableRegistry.Instance.GetTableState(table.TableId);
+            if (tableState != null && tableState.currentStreet != "BetweenHands")
+            {
+                continue;
+            }
+
             if (table.CurrentPlayers < 2)
             {
                 SetTableBetweenHands(table.TableId);

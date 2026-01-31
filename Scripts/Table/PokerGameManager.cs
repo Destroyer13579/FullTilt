@@ -1793,6 +1793,11 @@ public class PokerGameManager : MonoBehaviour
         TableRegistry.Instance.UpdateTableState(tableId, Snapshot());
     }
 
+    void OnDisable()
+    {
+        SyncTableStateToRegistry();
+    }
+
     /// <summary>
     /// Step 3: Apply a snapshot to rebuild the table visuals
     /// This ONLY updates the visuals - doesn't run game logic
