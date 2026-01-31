@@ -168,7 +168,6 @@ public class AIPlayer
 public class AIPlayerManager
 {
     private static AIPlayerManager _instance;
-    private static bool _hasInitialized = false;
     public static AIPlayerManager Instance
     {
         get
@@ -178,8 +177,6 @@ public class AIPlayerManager
             return _instance;
         }
     }
-
-    public bool IsInitialized => _hasInitialized;
 
     public List<AIPlayer> AllPlayers = new List<AIPlayer>();
     public int TotalPlayersOnline => AllPlayers.FindAll(p => !string.IsNullOrEmpty(p.CurrentTableId)).Count;
@@ -217,12 +214,6 @@ public class AIPlayerManager
     /// </summary>
     public void Initialize()
     {
-        if (_hasInitialized)
-        {
-            UnityEngine.Debug.LogError("===== AIPlayerManager.Initialize() SKIPPED (already initialized) =====");
-            return;
-        }
-
         UnityEngine.Debug.LogError("===== AIPlayerManager.Initialize() CALLED =====");
         UnityEngine.Debug.LogError($"AllPlayers count BEFORE: {AllPlayers.Count}");
 
@@ -304,7 +295,6 @@ public class AIPlayerManager
             SavePlayers();
         }
 
-        _hasInitialized = true;
         UnityEngine.Debug.LogError($"===== Initialize() COMPLETE - AllPlayers: {AllPlayers.Count} =====");
     }
 
@@ -328,7 +318,6 @@ public class AIPlayerManager
         SavePlayers();
 
         UnityEngine.Debug.LogError($"✓ Generated {AllPlayers.Count} fresh players");
-        _hasInitialized = true;
     }
 
     /// <summary>

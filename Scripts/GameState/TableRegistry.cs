@@ -52,19 +52,12 @@ public class TableRegistry : MonoBehaviour
     {
         string tableId = GenerateTableId(stake);
 
-        TableState initialState = new TableState { tableId = tableId };
-        initialState.seats.Clear();
-        for (int i = 0; i < maxSeats; i++)
-        {
-            initialState.seats.Add(new SeatSnapshot { seatIndex = i });
-        }
-
         PokerTableInfo tableInfo = new PokerTableInfo
         {
             tableId = tableId,
             stake = stake,
             maxSeats = maxSeats,
-            currentState = initialState,
+            currentState = new TableState { tableId = tableId },
             isActivelyRendered = false,
             createdTime = DateTime.Now
         };

@@ -274,24 +274,14 @@ public class PlayerUIController : MonoBehaviour
             // Facing bet → show CALL and RAISE
             if (callButton != null)
             {
-                // ★ FIX: Allow calling with less chips (all-in call)
-                // Player can call as long as they have ANY chips and there's a bet to call
-                bool canCall = currentState.amountToCall > 0 && playerSeat.ChipCount > 0;
+                bool canCall = currentState.amountToCall > 0 && currentState.amountToCall <= playerSeat.ChipCount;
                 callButton.gameObject.SetActive(canCall);
                 callButton.interactable = canCall;
 
                 if (callButtonText != null && currentState.amountToCall > 0)
                 {
                     int callAmount = Mathf.Min(currentState.amountToCall, playerSeat.ChipCount);
-                    // Show "Call $X (All-In)" if calling with all remaining chips
-                    if (callAmount == playerSeat.ChipCount)
-                    {
-                        callButtonText.text = $"Call ${callAmount} (All-In)";
-                    }
-                    else
-                    {
-                        callButtonText.text = $"Call ${callAmount}";
-                    }
+                    callButtonText.text = $"Call ${callAmount}";
                 }
                 UnityEngine.Debug.Log($"[PlayerUI] CALL button active: {canCall}");
             }

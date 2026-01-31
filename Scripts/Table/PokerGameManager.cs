@@ -89,36 +89,6 @@ public class PokerGameManager : MonoBehaviour
     {
         UnityEngine.Debug.Log("[PokerGameManager] START - Script initialized!");
 
-        // ★★★ CRITICAL VALIDATION: Check community card images array! ★★★
-        if (communityCardImages == null || communityCardImages.Count < 5)
-        {
-            UnityEngine.Debug.LogError("═══════════════════════════════════════════════════════");
-            UnityEngine.Debug.LogError("⚠️⚠️⚠️ CRITICAL ERROR: communityCardImages NOT SET UP! ⚠️⚠️⚠️");
-            UnityEngine.Debug.LogError($"Current count: {(communityCardImages != null ? communityCardImages.Count : 0)}/5");
-            UnityEngine.Debug.LogError("FLOP CARDS WILL NOT DISPLAY!");
-            UnityEngine.Debug.LogError("");
-            UnityEngine.Debug.LogError("TO FIX:");
-            UnityEngine.Debug.LogError("1. Select PokerGameManager in the Hierarchy");
-            UnityEngine.Debug.LogError("2. In Inspector, find 'Community Card Images' list");
-            UnityEngine.Debug.LogError("3. Set Size to 5");
-            UnityEngine.Debug.LogError("4. Drag all 5 community card Image objects into the slots");
-            UnityEngine.Debug.LogError("═══════════════════════════════════════════════════════");
-        }
-        else
-        {
-            UnityEngine.Debug.Log($"✓ communityCardImages properly configured with {communityCardImages.Count} slots");
-
-            // Verify each slot has an image assigned
-            for (int i = 0; i < communityCardImages.Count; i++)
-            {
-                if (communityCardImages[i] == null)
-                {
-                    UnityEngine.Debug.LogError($"⚠️ Slot {i} in communityCardImages is NULL! Assign an Image to slot {i}!");
-                }
-            }
-        }
-
-
         // ★★★ READ PLAYERPREFS IMMEDIATELY (before TableManager.Start() deletes them!) ★★★
         savedTableId = PlayerPrefs.GetString("SelectedTableId", "");
         joiningMidHand = PlayerPrefs.GetInt("JoiningMidHand", 0) == 1;
@@ -435,12 +405,9 @@ public class PokerGameManager : MonoBehaviour
                     // Apply the snapshot to restore the hand
                     ApplySnapshot(snapshot);
 
-                    // ★ Set flags to skip dealing cards ONLY if there are cards on board
-                    // If joining during PreFlop (no cards yet), we should still deal the flop!
-                    loadedFromSnapshot = (snapshot.boardCards != null && snapshot.boardCards.Count > 0);
+                    // ★ Set flags to skip dealing cards AND skip betting if complete
+                    loadedFromSnapshot = true;
                     // bettingCompleteFromSnapshot is set inside ApplySnapshot
-
-                    UnityEngine.Debug.Log($"[PokerGameManager] loadedFromSnapshot = {loadedFromSnapshot} (board has {snapshot.boardCards?.Count ?? 0} cards)");
 
                     UnityEngine.Debug.Log("[PokerGameManager] ✓ Hand loaded - you're watching mid-hand!");
                     UnityEngine.Debug.Log($"[PokerGameManager] ✓ Flags: loadedFromSnapshot={loadedFromSnapshot}, bettingComplete={bettingCompleteFromSnapshot}");
@@ -493,25 +460,6 @@ public class PokerGameManager : MonoBehaviour
         if (joiner != null)
         {
             joiner.ProcessWaitingPlayers();
-        }
-        else
-        {
-            // Fallback: clear waiting flags even if TableJoiner isn't present
-            foreach (var seat in tableManager.seats)
-            {
-                if (seat == null || !seat.IsSeated)
-                {
-                    continue;
-                }
-
-                PlayerSeatStatus status = seat.GetComponent<PlayerSeatStatus>();
-                if (status != null && status.isWaitingForNextHand)
-                {
-                    status.isWaitingForNextHand = false;
-                    seat.UpdateChips(seat.ChipCount);
-                    UnityEngine.Debug.Log($"[PokerGameManager] {seat.PlayerName} no longer waiting - will be dealt in");
-                }
-            }
         }
 
         // Reset
@@ -891,14 +839,6 @@ public class PokerGameManager : MonoBehaviour
     {
         UnityEngine.Debug.Log("Dealing flop...");
 
-        // ★ SAFETY CHECK: Verify communityCardImages has 5 slots!
-        if (communityCardImages == null || communityCardImages.Count < 5)
-        {
-            UnityEngine.Debug.LogError("⚠️⚠️⚠️ CANNOT DEAL FLOP - communityCardImages not configured!");
-            UnityEngine.Debug.LogError($"communityCardImages has {(communityCardImages != null ? communityCardImages.Count : 0)} slots, needs 5!");
-            yield break;  // Stop dealing
-        }
-
         // Burn one card
         deck.Deal();
 
@@ -941,14 +881,6 @@ public class PokerGameManager : MonoBehaviour
     IEnumerator DealFlopInstant()
     {
         UnityEngine.Debug.Log("[Showdown] Dealing flop INSTANTLY for all-in showdown...");
-
-        // ★ SAFETY CHECK: Verify communityCardImages has 5 slots!
-        if (communityCardImages == null || communityCardImages.Count < 5)
-        {
-            UnityEngine.Debug.LogError("⚠️⚠️⚠️ CANNOT DEAL FLOP - communityCardImages not configured!");
-            UnityEngine.Debug.LogError($"communityCardImages has {(communityCardImages != null ? communityCardImages.Count : 0)} slots, needs 5!");
-            yield break;  // Stop dealing
-        }
 
         // Burn one card
         deck.Deal();
@@ -2069,21 +2001,7 @@ public class PokerGameManager : MonoBehaviour
         {
             if (state.seats[i].isOccupied && !state.seats[i].hasFolded)
             {
-                // ★ CRITICAL FIX: Check if this seat is waiting for next hand (joined mid-hand)
-                // Players who joined mid-hand should NOT be in activePlayers until next hand starts
-                PlayerSeat seat = tableManager.seats[i];
-                PlayerSeatStatus status = seat?.GetComponent<PlayerSeatStatus>();
-                bool isWaiting = (status != null && status.isWaitingForNextHand);
-
-                if (!isWaiting)
-                {
-                    activePlayers.Add(i);
-                    UnityEngine.Debug.Log($"[ApplySnapshot] Added seat {i} to activePlayers (from snapshot)");
-                }
-                else
-                {
-                    UnityEngine.Debug.Log($"[ApplySnapshot] Skipping seat {i} - waiting for next hand (joined mid-hand)");
-                }
+                activePlayers.Add(i);
             }
         }
 

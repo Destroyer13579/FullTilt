@@ -45,7 +45,6 @@ public class LobbyManager : MonoBehaviour
     private static List<TableData> allTables = new List<TableData>();
     private Dictionary<string, TableRowUI> tableRows = new Dictionary<string, TableRowUI>();
     private TableData selectedTable = null;
-    private static bool lobbyInitialized = false;
 
     // ★ Persistence flag - prevent re-initialization
 
@@ -71,16 +70,8 @@ public class LobbyManager : MonoBehaviour
     void Start()
     {
         UpdatePlayerInfo();
-        SetupActionButtons();
-
-        if (lobbyInitialized)
-        {
-            SyncWithExistingState();
-            return;
-        }
-
         InitializeLobby();
-        lobbyInitialized = true;
+        SetupActionButtons();
     }
 
     void SetupActionButtons()
@@ -146,7 +137,6 @@ public class LobbyManager : MonoBehaviour
 
     void InitializeLobby()
     {
-        bool isServerMode = true;  // ← ADD THIS LINE
         UnityEngine.Debug.Log("[Lobby] ★★★ INITIALIZING LOBBY ★★★");
 
         // Set avatar count to match avatar database
@@ -161,11 +151,9 @@ public class LobbyManager : MonoBehaviour
             UnityEngine.Debug.LogWarning("[Lobby] No avatar database, defaulting to 6 avatars");
         }
 
-        // ★ Initialize AI Player Manager only once to preserve persistent state
-        if (!AIPlayerManager.Instance.IsInitialized)
-        {
-            AIPlayerManager.Instance.Initialize();
-        }
+        // ★ ALWAYS Initialize AI Player Manager
+        // This clears CurrentTableId for all players (unseats them)
+        AIPlayerManager.Instance.Initialize();
 
         // ★ Initialize poker simulator
         pokerSimulator = new LobbyPokerSimulator();
@@ -182,43 +170,22 @@ public class LobbyManager : MonoBehaviour
             UnityEngine.Debug.Log($"[Lobby] Using existing {allTables.Count} tables");
         }
 
-        // ★ Populate only if tables are empty (avoid wiping persistent state)
-        bool hasSeatedPlayers = allTables.Any(t => t.CurrentPlayers > 0);
-        if (!hasSeatedPlayers)
-        {
-            PopulateTablesWithAISmartly();
-        }
+        // ★ ALWAYS populate (players were unseated by Initialize())
+        PopulateTablesWithAISmartly();
         RefreshTableList();
+
+        // ★ Start the lobby's simulation loop (handles TimeSinceLastHand and hand simulation)
+        StartCoroutine(SimulationLoop());
 
         // ★★★ START PERSISTENT WORLD SIMULATOR ★★★
         // This runs FOREVER across all scenes
         PersistentWorldSimulator.Instance.StartSimulation();
-
-        // ★ Start the lobby's simulation loop only if persistent world is not running
-        if (!PersistentWorldSimulator.Instance.isRunning)
-        {
-            StartCoroutine(SimulationLoop());
-        }
 
         // ★★★ START CONTINUOUS LOBBY REFRESH ★★★
         // Updates every 2 seconds even when simulation is running
         StartCoroutine(ContinuousLobbyRefresh());
 
         UnityEngine.Debug.Log("[Lobby] ✓ Persistent world running - tables will update in real-time!");
-
-        // ★★★ START AI LIFECYCLE MANAGER ★★★
-        if (isServerMode)  // You'll need to define this bool at the top
-        {
-            var lifecycleManager = FindObjectOfType<AILifecycleManager>();
-            if (lifecycleManager == null)
-            {
-                GameObject lifecycleObj = new GameObject("AILifecycleManager");
-                lifecycleManager = lifecycleObj.AddComponent<AILifecycleManager>();
-                DontDestroyOnLoad(lifecycleObj);
-            }
-            lifecycleManager.InitializeServerMode();
-            UnityEngine.Debug.Log("[Lobby] ✓ AI Lifecycle Manager started");
-        }
     }
 
     void SyncWithExistingState()
@@ -237,7 +204,6 @@ public class LobbyManager : MonoBehaviour
         // Just update the display
 
         RefreshTableList();
-        UpdateTableCountsFromRegistry();
         UpdatePlayerCounts();
 
         UnityEngine.Debug.Log($"[Lobby] ✓ Synced - displaying {allTables.Count} existing tables");
@@ -249,11 +215,8 @@ public class LobbyManager : MonoBehaviour
             InvokeRepeating(nameof(CleanupBrokePlayers), 5f, 10f);
             InvokeRepeating(nameof(SaveAIState), 60f, 60f);
 
-            // Also restart simulation loop if persistent world is not running
-            if (!PersistentWorldSimulator.Instance.isRunning)
-            {
-                StartCoroutine(SimulationLoop());
-            }
+            // Also restart simulation loop
+            StartCoroutine(SimulationLoop());
         }
     }
 
@@ -718,17 +681,13 @@ public class LobbyManager : MonoBehaviour
         // Update table registry with the complete state
         TableRegistry.Instance.UpdateTableState(table.TableId, fullState);
 
-        // Move dealer button for next hand (rotate among occupied seats)
-        int nextDealer = dealerSeat;
-        int safety = 0;
-        do
+        // Move dealer button for next hand
+        int nextDealer = (dealerSeat + 1) % table.MaxPlayers;
+        while (nextDealer < table.SeatedPlayerIds.Count)
         {
-            nextDealer = (nextDealer + 1) % table.MaxPlayers;
-            safety++;
+            nextDealer++;
+            if (nextDealer >= table.MaxPlayers) nextDealer = 0;
         }
-        while (safety <= table.MaxPlayers &&
-               (nextDealer >= fullState.seats.Count || !fullState.seats[nextDealer].isOccupied));
-
         tableDealerPositions[table.TableId] = nextDealer;
 
         // Update hand number
@@ -1000,26 +959,11 @@ public class LobbyManager : MonoBehaviour
         PlayerPrefs.SetString("TablePlayerIds", playerIds);
         PlayerPrefs.SetInt("TableMaxPlayers", selectedTable.MaxPlayers);
 
-        // ★★★ Check if joining mid-hand (use TableRegistry as source of truth) ★★★
-        bool isHandInProgress = false;
-        float handTime = 0f;
-        TableState registryState = TableRegistry.Instance != null
-            ? TableRegistry.Instance.GetTableState(selectedTable.TableId)
-            : null;
-
-        if (registryState != null)
-        {
-            isHandInProgress = registryState.currentStreet != "BetweenHands";
-            UnityEngine.Debug.Log($"[Join] Registry street: {registryState.currentStreet}");
-        }
-        else
-        {
-            // Fallback to local timing if registry not available
-            handTime = handDuration / Mathf.Max(2, selectedTable.CurrentPlayers);
-            isHandInProgress = selectedTable.CurrentPlayers >= 2 &&
+        // ★★★ Check if joining mid-hand ★★★
+        float handTime = handDuration / Mathf.Max(2, selectedTable.CurrentPlayers);
+        bool isHandInProgress = selectedTable.CurrentPlayers >= 2 &&
                                selectedTable.TimeSinceLastHand > 0 &&
                                selectedTable.TimeSinceLastHand < handTime;
-        }
         PlayerPrefs.SetInt("JoiningMidHand", isHandInProgress ? 1 : 0);
 
         // ★★★ DEBUG LOGS
@@ -1209,6 +1153,10 @@ public class LobbyManager : MonoBehaviour
     /// </summary>
     IEnumerator ContinuousLobbyRefresh()
     {
+        UnityEngine.Debug.Log("[Lobby] ★ Continuous refresh DISABLED - prevents count resets");
+        yield break;  // Exit immediately
+
+        /*
         UnityEngine.Debug.Log("[Lobby] ★ Starting continuous refresh - lobby will stay alive!");
         
         while (true)
@@ -1221,6 +1169,7 @@ public class LobbyManager : MonoBehaviour
             // Refresh UI
             RefreshTableList();
         }
+        */
     }
 
     /// <summary>
@@ -1229,6 +1178,12 @@ public class LobbyManager : MonoBehaviour
     /// </summary>
     void UpdateTableCountsFromRegistry()
     {
+        // ★ DISABLED FOR NOW - Causes tables to go to 0/9
+        // The issue: TableRegistry isn't properly synced with lobby's initial population
+        // Re-enable when we have proper sync
+        return;
+
+        /*
         var registryTables = TableRegistry.Instance.GetAllTables();
         
         foreach (var regTable in registryTables)
@@ -1256,17 +1211,9 @@ public class LobbyManager : MonoBehaviour
                             if (player != null)
                             {
                                 lobbyTable.SeatedPlayerIds.Add(player.PlayerId);
-                                player.UpdateChips(seat.chipCount);
-                                if (string.IsNullOrEmpty(player.CurrentTableId))
-                                {
-                                    player.CurrentTableId = regTable.tableId;
-                                }
                             }
                         }
                     }
-
-                    lobbyTable.AveragePot = tableState.totalPot;
-                    lobbyTable.CurrentHandNumber = tableState.handNumber;
                 }
                 
                 if (oldCount != lobbyTable.CurrentPlayers)
@@ -1276,6 +1223,7 @@ public class LobbyManager : MonoBehaviour
                 }
             }
         }
+        */
     }
 
     /// <summary>
