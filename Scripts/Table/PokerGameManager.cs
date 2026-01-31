@@ -85,6 +85,8 @@ public class PokerGameManager : MonoBehaviour
     private bool loadedFromSnapshot = false;  // ★ Skip dealing cards if loaded from snapshot
     private bool bettingCompleteFromSnapshot = false;  // ★ Skip betting round if complete
 
+    private const float minBetweenHandsDelay = 0.5f;
+
     void Start()
     {
         UnityEngine.Debug.Log("[PokerGameManager] START - Script initialized!");
@@ -122,6 +124,15 @@ public class PokerGameManager : MonoBehaviour
         // ★★★ READ PLAYERPREFS IMMEDIATELY (before TableManager.Start() deletes them!) ★★★
         savedTableId = PlayerPrefs.GetString("SelectedTableId", "");
         joiningMidHand = PlayerPrefs.GetInt("JoiningMidHand", 0) == 1;
+
+        if (!string.IsNullOrEmpty(savedTableId))
+        {
+            TableState registryState = TableRegistry.Instance.GetTableState(savedTableId);
+            if (registryState != null && registryState.currentStreet != "BetweenHands")
+            {
+                joiningMidHand = true;
+            }
+        }
 
         UnityEngine.Debug.Log($"[PokerGameManager] Saved table ID: '{savedTableId}'");
 
@@ -398,6 +409,16 @@ public class PokerGameManager : MonoBehaviour
 
     IEnumerator WaitForPlayers()
     {
+        // If joining between hands, sync dealer/blinds and use a natural-looking delay.
+        if (!joiningMidHand && !string.IsNullOrEmpty(savedTableId))
+        {
+            TableState snapshot = TableRegistry.Instance.GetTableState(savedTableId);
+            if (snapshot != null && snapshot.currentStreet == "BetweenHands")
+            {
+                ApplyBetweenHandsSnapshot(snapshot);
+            }
+        }
+
         // ★★★ CHECK IF JOINING MID-HAND FIRST (before waiting) ★★★
         if (joiningMidHand)
         {
@@ -435,9 +456,9 @@ public class PokerGameManager : MonoBehaviour
                     // Apply the snapshot to restore the hand
                     ApplySnapshot(snapshot);
 
-                    // ★ Set flags to skip dealing cards ONLY if there are cards on board
-                    // If joining during PreFlop (no cards yet), we should still deal the flop!
-                    loadedFromSnapshot = (snapshot.boardCards != null && snapshot.boardCards.Count > 0);
+                    // ★ Skip dealing if snapshot already contains hole cards (even preflop)
+                    bool hasHoleCards = snapshot.seats.Any(seat => seat.holeCards != null && seat.holeCards.Count == 2);
+                    loadedFromSnapshot = hasHoleCards || (snapshot.boardCards != null && snapshot.boardCards.Count > 0);
                     // bettingCompleteFromSnapshot is set inside ApplySnapshot
 
                     UnityEngine.Debug.Log($"[PokerGameManager] loadedFromSnapshot = {loadedFromSnapshot} (board has {snapshot.boardCards?.Count ?? 0} cards)");
@@ -478,7 +499,17 @@ public class PokerGameManager : MonoBehaviour
 
         if (autoStartHands)
         {
-            yield return new WaitForSeconds(2f); // Brief delay before starting
+            float delay = betweenHandsDelay;
+            if (!joiningMidHand && !string.IsNullOrEmpty(savedTableId))
+            {
+                TableState snapshot = TableRegistry.Instance.GetTableState(savedTableId);
+                if (snapshot != null && snapshot.currentStreet == "BetweenHands")
+                {
+                    delay = GetBetweenHandsDelay(snapshot);
+                }
+            }
+
+            yield return new WaitForSeconds(delay); // Natural delay before starting
             currentState = GameState.StartingHand;
         }
     }
@@ -493,6 +524,25 @@ public class PokerGameManager : MonoBehaviour
         if (joiner != null)
         {
             joiner.ProcessWaitingPlayers();
+        }
+        else
+        {
+            // Fallback: clear waiting flags even if TableJoiner isn't present
+            foreach (var seat in tableManager.seats)
+            {
+                if (seat == null || !seat.IsSeated)
+                {
+                    continue;
+                }
+
+                PlayerSeatStatus status = seat.GetComponent<PlayerSeatStatus>();
+                if (status != null && status.isWaitingForNextHand)
+                {
+                    status.isWaitingForNextHand = false;
+                    seat.UpdateChips(seat.ChipCount);
+                    UnityEngine.Debug.Log($"[PokerGameManager] {seat.PlayerName} no longer waiting - will be dealt in");
+                }
+            }
         }
 
         // Reset
@@ -600,6 +650,33 @@ public class PokerGameManager : MonoBehaviour
 
         yield return new WaitForSeconds(0.5f);
         currentState = GameState.PostingBlinds;
+    }
+
+    private void ApplyBetweenHandsSnapshot(TableState snapshot)
+    {
+        dealerSeatIndex = snapshot.dealerButtonSeat;
+        smallBlindSeatIndex = snapshot.smallBlindSeat;
+        bigBlindSeatIndex = snapshot.bigBlindSeat;
+
+        if (dealerButtonImage != null && dealerButtonPositions != null &&
+            dealerSeatIndex >= 0 && dealerSeatIndex < dealerButtonPositions.Count)
+        {
+            dealerButtonImage.gameObject.SetActive(true);
+            dealerButtonImage.transform.position = dealerButtonPositions[dealerSeatIndex].position;
+        }
+
+        UnityEngine.Debug.Log($"[PokerGameManager] Synced between-hands dealer button to seat {dealerSeatIndex}");
+    }
+
+    private float GetBetweenHandsDelay(TableState snapshot)
+    {
+        int seed = snapshot.handNumber;
+        seed = (seed * 31) + snapshot.dealerButtonSeat;
+        seed = (seed * 17) + snapshot.smallBlindSeat;
+        seed = (seed * 13) + snapshot.bigBlindSeat;
+
+        float normalized = Mathf.Abs(seed % 1000) / 1000f;
+        return Mathf.Lerp(minBetweenHandsDelay, betweenHandsDelay, normalized);
     }
 
     void MoveDealer()
@@ -1732,8 +1809,11 @@ public class PokerGameManager : MonoBehaviour
         TableState state = new TableState();
 
         // === BASIC INFO ===
-        state.tableId = gameObject.name;  // Use GameObject name as table ID
-        state.handNumber = 0;  // TODO: Add hand counter later
+        state.tableId = tableManager != null ? tableManager.tableId : gameObject.name;
+        TableState registryState = !string.IsNullOrEmpty(state.tableId)
+            ? TableRegistry.Instance.GetTableState(state.tableId)
+            : null;
+        state.handNumber = registryState != null ? registryState.handNumber : 0;
 
         // === DEALER & BLINDS ===
         state.dealerButtonSeat = dealerSeatIndex;
@@ -1744,7 +1824,7 @@ public class PokerGameManager : MonoBehaviour
         state.totalPot = pot;
 
         // === CURRENT STREET ===
-        state.currentStreet = currentState.ToString();  // "PreFlop", "Flop", etc.
+        state.currentStreet = GetStreetNameForState(currentState);
 
         // === BOARD CARDS ===
         state.boardCards.Clear();
@@ -1757,11 +1837,7 @@ public class PokerGameManager : MonoBehaviour
         state.currentPlayerSeat = currentPlayerIndex;
 
         // Get current bet amount from betting manager if available
-        if (bettingManager != null)
-        {
-            // We'll need to expose this from BettingRoundManager later
-            state.currentBet = 0;  // TODO: Get from bettingManager
-        }
+        state.currentBet = bettingManager != null ? bettingManager.CurrentBet : 0;
 
         // === SEATS ===
         state.seats.Clear();
@@ -1808,6 +1884,25 @@ public class PokerGameManager : MonoBehaviour
         UnityEngine.Debug.Log($"[Snapshot] Captured table state: {state.seats.Count} seats, pot=${state.totalPot}, street={state.currentStreet}");
 
         return state;
+    }
+
+    private string GetStreetNameForState(GameState state)
+    {
+        switch (state)
+        {
+            case GameState.PreFlop:
+                return "PreFlop";
+            case GameState.Flop:
+                return "Flop";
+            case GameState.Turn:
+                return "Turn";
+            case GameState.River:
+                return "River";
+            case GameState.Showdown:
+                return "Showdown";
+            default:
+                return "BetweenHands";
+        }
     }
 
     /// <summary>
@@ -2016,6 +2111,15 @@ public class PokerGameManager : MonoBehaviour
                         // Mark folded players (hide their cards)
                         seat.HideCards();
                         UnityEngine.Debug.Log($"[ApplySnapshot] Hiding cards for folded seat {i}: {seatSnap.playerName}");
+                    }
+                    else if (seatSnap.isOccupied)
+                    {
+                        // If we don't have hole cards yet, still show card backs to indicate active hand.
+                        if (cardDatabase != null && cardDatabase.cardBackSprite != null)
+                        {
+                            seat.ShowCardBacks(cardDatabase.cardBackSprite);
+                            UnityEngine.Debug.Log($"[ApplySnapshot] Showing default card backs for seat {i}: {seatSnap.playerName}");
+                        }
                     }
 
                     // Mark all-in players
