@@ -28,6 +28,12 @@ public class PersistentWorldSimulator : MonoBehaviour
     }
 
     [Header("Simulation Settings")]
+    [Tooltip("How often to simulate table state (seconds)")]
+    public float simulationTickRate = 1f;
+
+    [Tooltip("Approximate hand duration in seconds (before adjustment by player count)")]
+    public float handDuration = 30f;
+
     [Tooltip("How often to check for players joining/leaving tables (seconds)")]
     public float dynamicSeatFillingInterval = 45f;
 
@@ -42,8 +48,10 @@ public class PersistentWorldSimulator : MonoBehaviour
     public float timeSinceLastFill = 0f;
     public float timeSinceLastCleanup = 0f;
     public float timeSinceLastSave = 0f;
+    public float timeSinceLastSimulation = 0f;
 
     private LobbyPokerSimulator pokerSimulator;
+    private Dictionary<string, int> tableDealerPositions = new Dictionary<string, int>();
 
     void Awake()
     {
@@ -70,16 +78,6 @@ public class PersistentWorldSimulator : MonoBehaviour
             return;
         }
 
-        UnityEngine.Debug.Log("[PersistentWorld] ★ DISABLED - Using lobby-based simulation instead");
-        UnityEngine.Debug.Log("[PersistentWorld] ★ This prevents conflicts between lobby and persistent world");
-
-        // TODO: Re-enable when we have proper TableRegistry sync
-        // For now, let the lobby handle everything
-
-        isRunning = false;
-        return;
-
-        /*
         UnityEngine.Debug.Log("[PersistentWorld] ★ Starting continuous simulation across all scenes");
         
         // Initialize poker simulator
@@ -92,7 +90,6 @@ public class PersistentWorldSimulator : MonoBehaviour
         StartCoroutine(PersistentSimulationLoop());
         
         UnityEngine.Debug.Log("[PersistentWorld] ✓ Simulation running - will continue even when player is at table!");
-        */
     }
 
     /// <summary>
@@ -106,6 +103,7 @@ public class PersistentWorldSimulator : MonoBehaviour
             timeSinceLastFill += Time.deltaTime;
             timeSinceLastCleanup += Time.deltaTime;
             timeSinceLastSave += Time.deltaTime;
+            timeSinceLastSimulation += Time.deltaTime;
 
             // Dynamic seat filling
             if (timeSinceLastFill >= dynamicSeatFillingInterval)
@@ -128,8 +126,131 @@ public class PersistentWorldSimulator : MonoBehaviour
                 timeSinceLastSave = 0f;
             }
 
+            if (timeSinceLastSimulation >= simulationTickRate)
+            {
+                SimulateTick();
+                timeSinceLastSimulation = 0f;
+            }
+
             yield return new WaitForSeconds(1f); // Check every second
         }
+    }
+
+    void SimulateTick()
+    {
+        if (LobbyManager.AllTables == null || LobbyManager.AllTables.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var table in LobbyManager.AllTables)
+        {
+            var tableInfo = TableRegistry.Instance.GetTableInfo(table.TableId);
+            if (tableInfo != null && tableInfo.isActivelyRendered)
+            {
+                continue;
+            }
+
+            var tableState = TableRegistry.Instance.GetTableState(table.TableId);
+            if (tableState != null && tableState.currentStreet != "BetweenHands")
+            {
+                continue;
+            }
+
+            if (table.CurrentPlayers < 2)
+            {
+                SetTableBetweenHands(table.TableId);
+                continue;
+            }
+
+            table.TimeSinceLastHand += simulationTickRate;
+
+            float handTime = handDuration / table.CurrentPlayers;
+            if (table.TimeSinceLastHand >= handTime)
+            {
+                SimulateHand(table);
+                table.TimeSinceLastHand = 0f;
+            }
+        }
+    }
+
+    void SetTableBetweenHands(string tableId)
+    {
+        var tableState = TableRegistry.Instance.GetTableState(tableId);
+        if (tableState == null)
+        {
+            return;
+        }
+
+        tableState.currentStreet = "BetweenHands";
+        tableState.bettingComplete = false;
+        tableState.totalPot = 0;
+        tableState.currentBet = 0;
+        tableState.boardCards.Clear();
+        TableRegistry.Instance.UpdateTableState(tableId, tableState);
+    }
+
+    void SimulateHand(TableData table)
+    {
+        if (!tableDealerPositions.ContainsKey(table.TableId))
+        {
+            tableDealerPositions[table.TableId] = 0;
+        }
+
+        int dealerSeat = tableDealerPositions[table.TableId];
+
+        TableState fullState = pokerSimulator.SimulateHand(table, table.CurrentHandNumber, dealerSeat);
+        TableRegistry.Instance.UpdateTableState(table.TableId, fullState);
+
+        int nextDealer = (dealerSeat + 1) % table.MaxPlayers;
+        while (nextDealer < table.SeatedPlayerIds.Count)
+        {
+            nextDealer++;
+            if (nextDealer >= table.MaxPlayers) nextDealer = 0;
+        }
+        tableDealerPositions[table.TableId] = nextDealer;
+
+        table.CurrentHandNumber++;
+
+        var players = table.SeatedPlayerIds
+            .Select(id => AIPlayerManager.Instance.GetPlayer(id))
+            .Where(p => p != null)
+            .ToList();
+
+        if (players.Count >= 2)
+        {
+            var activePlayers = players.Where(p => !fullState.seats[players.IndexOf(p)].hasFolded).ToList();
+            if (activePlayers.Count > 0)
+            {
+                var winner = activePlayers[UnityEngine.Random.Range(0, activePlayers.Count)];
+
+                foreach (var player in players)
+                {
+                    int seatIndex = table.SeatedPlayerIds.IndexOf(player.PlayerId);
+                    int finalChips = fullState.seats[seatIndex].chipCount;
+
+                    if (player == winner)
+                    {
+                        finalChips += fullState.totalPot;
+                    }
+
+                    player.UpdateChips(finalChips);
+                    player.HandsPlayed++;
+
+                    if (player == winner) player.HandsWon++;
+
+                    if (player.ChipsAtTable <= 0)
+                    {
+                        RemovePlayerFromTableRegistry(table.TableId, player);
+                        player.LeaveTable();
+                        table.SeatedPlayerIds.Remove(player.PlayerId);
+                        table.CurrentPlayers = Mathf.Max(0, table.CurrentPlayers - 1);
+                    }
+                }
+            }
+        }
+
+        table.AveragePot = (table.AveragePot * 0.9f) + (fullState.totalPot * 0.1f);
     }
 
     /// <summary>
@@ -290,6 +411,32 @@ public class PersistentWorldSimulator : MonoBehaviour
                 tableState.seats[i].playerName = "";
                 tableState.seats[i].chipCount = 0;
                 tableState.seats[i].isSittingOut = false;
+                break;
+            }
+        }
+
+        TableRegistry.Instance.UpdateTableState(tableId, tableState);
+    }
+
+    void RemovePlayerFromTableRegistry(string tableId, string playerName)
+    {
+        var tableState = TableRegistry.Instance.GetTableState(tableId);
+
+        if (tableState == null)
+            return;
+
+        for (int i = 0; i < tableState.seats.Count; i++)
+        {
+            if (tableState.seats[i].playerName == playerName)
+            {
+                tableState.seats[i].isOccupied = false;
+                tableState.seats[i].playerName = "";
+                tableState.seats[i].chipCount = 0;
+                tableState.seats[i].isSittingOut = false;
+                tableState.seats[i].hasFolded = false;
+                tableState.seats[i].isAllIn = false;
+                tableState.seats[i].currentBet = 0;
+                tableState.seats[i].holeCards.Clear();
                 break;
             }
         }

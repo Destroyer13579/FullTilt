@@ -57,7 +57,7 @@ public class TableRegistry : MonoBehaviour
             tableId = tableId,
             stake = stake,
             maxSeats = maxSeats,
-            currentState = new TableState { tableId = tableId },
+            currentState = CreateEmptyState(tableId, maxSeats),
             isActivelyRendered = false,
             createdTime = DateTime.Now
         };
@@ -75,6 +75,34 @@ public class TableRegistry : MonoBehaviour
         UnityEngine.Debug.Log($"[TableRegistry] Registered new table: {tableId} ({stake.Name})");
 
         return tableId;
+    }
+
+    private TableState CreateEmptyState(string tableId, int maxSeats)
+    {
+        TableState state = new TableState
+        {
+            tableId = tableId,
+            currentStreet = "BetweenHands"
+        };
+
+        state.seats.Clear();
+        for (int i = 0; i < maxSeats; i++)
+        {
+            state.seats.Add(new SeatSnapshot
+            {
+                seatIndex = i,
+                isOccupied = false,
+                playerName = "",
+                chipCount = 0,
+                hasFolded = false,
+                isAllIn = false,
+                isSittingOut = false,
+                currentBet = 0,
+                holeCards = new List<string>()
+            });
+        }
+
+        return state;
     }
 
     /// <summary>
