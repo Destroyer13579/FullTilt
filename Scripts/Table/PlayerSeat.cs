@@ -209,7 +209,7 @@ public class PlayerSeat : MonoBehaviour
 
         if (nameText != null)
         {
-            nameText.text = playerName;
+            nameText.text = GetDisplayName(playerName);
             nameText.fontSize = 25;
             UnityEngine.Debug.Log($"[PlayerSeat {seatIndex}] Set {playerName} font size to 18 (was {nameText.fontSize})");
         }
@@ -443,6 +443,16 @@ public class PlayerSeat : MonoBehaviour
             avatarImage.sprite = avatarData.AvatarSprite;
             avatarImage.color = avatarData.AvatarColor;
         }
+    }
+
+    string GetDisplayName(string fullName)
+    {
+        if (string.IsNullOrEmpty(fullName))
+        {
+            return fullName;
+        }
+
+        return fullName.Length > 9 ? fullName.Substring(0, 9) : fullName;
     }
 
     // === CARDS ===

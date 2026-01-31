@@ -115,15 +115,11 @@ public class TableManager : MonoBehaviour
                         continue;
                     }
 
-                    string displayName = aiPlayer.PlayerName.Length > 9
-                        ? aiPlayer.PlayerName.Substring(0, 9)
-                        : aiPlayer.PlayerName;
-
                     aiPlayer.UpdateChips(seatSnapshot.chipCount);
                     aiPlayer.CurrentTableId = tableId;
 
-                    UnityEngine.Debug.Log($"[TableManager]   Seating {displayName} at seat {seatIndex} with ${seatSnapshot.chipCount}, Avatar: {aiPlayer.AvatarId}");
-                    SeatAI(seatIndex, displayName, seatSnapshot.chipCount, aiPlayer.AvatarId);
+                    UnityEngine.Debug.Log($"[TableManager]   Seating {aiPlayer.PlayerName} at seat {seatIndex} with ${seatSnapshot.chipCount}, Avatar: {aiPlayer.AvatarId}");
+                    SeatAI(seatIndex, aiPlayer.PlayerName, seatSnapshot.chipCount, aiPlayer.AvatarId);
                     playersSeated++;
                 }
 
@@ -167,13 +163,9 @@ public class TableManager : MonoBehaviour
                             break;
                         }
 
-                        string displayName = aiPlayer.PlayerName.Length > 9
-                            ? aiPlayer.PlayerName.Substring(0, 9)
-                            : aiPlayer.PlayerName;
+                        UnityEngine.Debug.Log($"[TableManager]   Seating {aiPlayer.PlayerName} at seat {emptySeat} with ${aiPlayer.ChipsAtTable}, Avatar: {aiPlayer.AvatarId}");
 
-                        UnityEngine.Debug.Log($"[TableManager]   Seating {displayName} at seat {emptySeat} with ${aiPlayer.ChipsAtTable}, Avatar: {aiPlayer.AvatarId}");
-
-                        SeatAI(emptySeat, displayName, aiPlayer.ChipsAtTable, aiPlayer.AvatarId);
+                        SeatAI(emptySeat, aiPlayer.PlayerName, aiPlayer.ChipsAtTable, aiPlayer.AvatarId);
                         aiPlayer.CurrentTableId = tableId;
 
                         playersSeated++;
