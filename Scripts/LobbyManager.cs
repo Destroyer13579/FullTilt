@@ -46,6 +46,8 @@ public class LobbyManager : MonoBehaviour
     private Dictionary<string, TableRowUI> tableRows = new Dictionary<string, TableRowUI>();
     private TableData selectedTable = null;
 
+    public static List<TableData> AllTables => allTables;
+
     // ★ Persistence flag - prevent re-initialization
 
     // ★ Poker simulator for actual card-based simulation
@@ -151,38 +153,55 @@ public class LobbyManager : MonoBehaviour
             UnityEngine.Debug.LogWarning("[Lobby] No avatar database, defaulting to 6 avatars");
         }
 
-        // ★ ALWAYS Initialize AI Player Manager
-        // This clears CurrentTableId for all players (unseats them)
+        // ★ Initialize AI Player Manager (preserves seated players for persistence)
         AIPlayerManager.Instance.Initialize();
 
         // ★ Initialize poker simulator
         pokerSimulator = new LobbyPokerSimulator();
         UnityEngine.Debug.Log("[Lobby] ✓ Poker simulator initialized");
 
+        bool hasRegistryTables = TableRegistry.Instance.GetAllTables().Count > 0;
+
         // ★ Only generate tables if they don't exist yet
-        if (allTables.Count == 0)
+        if (allTables.Count == 0 && !hasRegistryTables)
         {
             UnityEngine.Debug.Log("[Lobby] Generating fresh table list");
             GenerateTables();
+        }
+        else if (allTables.Count == 0 && hasRegistryTables)
+        {
+            UnityEngine.Debug.Log("[Lobby] Rebuilding table list from registry");
+            BuildTablesFromRegistry();
         }
         else
         {
             UnityEngine.Debug.Log($"[Lobby] Using existing {allTables.Count} tables");
         }
 
-        // ★ ALWAYS populate (players were unseated by Initialize())
-        PopulateTablesWithAISmartly();
-        RefreshTableList();
+        bool hasSeatedPlayers = AIPlayerManager.Instance.AllPlayers.Any(p => !string.IsNullOrEmpty(p.CurrentTableId));
 
-        // ★ Start the lobby's simulation loop (handles TimeSinceLastHand and hand simulation)
-        StartCoroutine(SimulationLoop());
+        if (hasSeatedPlayers && !hasRegistryTables)
+        {
+            ClearSeatedPlayers();
+            hasSeatedPlayers = false;
+        }
+
+        if (!hasSeatedPlayers && !hasRegistryTables)
+        {
+            PopulateTablesWithAISmartly();
+        }
+        else
+        {
+            UpdateTableCountsFromRegistry();
+        }
+
+        RefreshTableList();
 
         // ★★★ START PERSISTENT WORLD SIMULATOR ★★★
         // This runs FOREVER across all scenes
         PersistentWorldSimulator.Instance.StartSimulation();
 
         // ★★★ START CONTINUOUS LOBBY REFRESH ★★★
-        // Updates every 2 seconds even when simulation is running
         StartCoroutine(ContinuousLobbyRefresh());
 
         UnityEngine.Debug.Log("[Lobby] ✓ Persistent world running - tables will update in real-time!");
@@ -249,6 +268,39 @@ public class LobbyManager : MonoBehaviour
             UnityEngine.Debug.Log($"[Lobby→Registry] Registered {table.TableName} (Registry ID: {registryTableId})");
         }
         UnityEngine.Debug.Log($"[Lobby→Registry] ✓ All {allTables.Count} tables registered with TableRegistry");
+    }
+
+    void BuildTablesFromRegistry()
+    {
+        allTables.Clear();
+        int nameIndex = 0;
+
+        foreach (var tableInfo in TableRegistry.Instance.GetAllTables())
+        {
+            string tableName = GetTableName(ref nameIndex);
+            TableData table = new TableData(tableName, tableInfo.stake, tableInfo.maxSeats)
+            {
+                TableId = tableInfo.tableId
+            };
+            allTables.Add(table);
+        }
+
+        UnityEngine.Debug.Log($"[Lobby] ✓ Rebuilt {allTables.Count} tables from registry");
+    }
+
+    void ClearSeatedPlayers()
+    {
+        int cleared = 0;
+        foreach (var player in AIPlayerManager.Instance.AllPlayers)
+        {
+            if (!string.IsNullOrEmpty(player.CurrentTableId))
+            {
+                player.LeaveTable();
+                cleared++;
+            }
+        }
+
+        UnityEngine.Debug.Log($"[Lobby] Reset {cleared} seated players (registry was empty)");
     }
 
     string GetTableName(ref int index)
@@ -776,6 +828,7 @@ public class LobbyManager : MonoBehaviour
         player.SitAtTable(table.TableId, buyIn);
         table.SeatedPlayerIds.Add(player.PlayerId);
         table.CurrentPlayers++;
+        SyncPlayerToTableRegistry(table.TableId, player);
     }
 
     void PlayerLeavesTable(AIPlayer player, TableData table)
@@ -783,6 +836,7 @@ public class LobbyManager : MonoBehaviour
         table.SeatedPlayerIds.Remove(player.PlayerId);
         table.CurrentPlayers--;
         player.LeaveTable();  // No parameters needed
+        RemovePlayerFromTableRegistry(table.TableId, player.PlayerName);
     }
 
     void UpdateUI()
@@ -959,18 +1013,19 @@ public class LobbyManager : MonoBehaviour
         PlayerPrefs.SetString("TablePlayerIds", playerIds);
         PlayerPrefs.SetInt("TableMaxPlayers", selectedTable.MaxPlayers);
 
-        // ★★★ Check if joining mid-hand ★★★
-        float handTime = handDuration / Mathf.Max(2, selectedTable.CurrentPlayers);
-        bool isHandInProgress = selectedTable.CurrentPlayers >= 2 &&
-                               selectedTable.TimeSinceLastHand > 0 &&
-                               selectedTable.TimeSinceLastHand < handTime;
+        // ★★★ Check if joining mid-hand (use registry state for persistence) ★★★
+        bool isHandInProgress = false;
+        var registryState = TableRegistry.Instance.GetTableState(selectedTable.TableId);
+        if (registryState != null)
+        {
+            isHandInProgress = registryState.currentStreet != "BetweenHands" && selectedTable.CurrentPlayers >= 2;
+        }
         PlayerPrefs.SetInt("JoiningMidHand", isHandInProgress ? 1 : 0);
 
         // ★★★ DEBUG LOGS
         UnityEngine.Debug.Log($"[Join] === MID-HAND CHECK ===");
         UnityEngine.Debug.Log($"[Join] Table: {selectedTable.TableName}");
-        UnityEngine.Debug.Log($"[Join] TimeSinceLastHand: {selectedTable.TimeSinceLastHand:F2}s");
-        UnityEngine.Debug.Log($"[Join] HandTime: {handTime:F2}s");
+        UnityEngine.Debug.Log($"[Join] Registry street: {(registryState != null ? registryState.currentStreet : "unknown")}");
         UnityEngine.Debug.Log($"[Join] CurrentPlayers: {selectedTable.CurrentPlayers}");
         UnityEngine.Debug.Log($"[Join] isHandInProgress: {isHandInProgress}");
         UnityEngine.Debug.Log($"[Join] Flag value: {(isHandInProgress ? 1 : 0)}");
@@ -1139,6 +1194,7 @@ public class LobbyManager : MonoBehaviour
                 UnityEngine.Debug.Log($"[CleanupBrokePlayers] {player.PlayerName} left {table.TableName} (broke and sitting out)");
             }
 
+            RemovePlayerFromTableRegistry(tableId, player.PlayerName);
             player.LeaveTable();  // Resets bankroll to $1,000 if broke
         }
 
@@ -1153,10 +1209,6 @@ public class LobbyManager : MonoBehaviour
     /// </summary>
     IEnumerator ContinuousLobbyRefresh()
     {
-        UnityEngine.Debug.Log("[Lobby] ★ Continuous refresh DISABLED - prevents count resets");
-        yield break;  // Exit immediately
-
-        /*
         UnityEngine.Debug.Log("[Lobby] ★ Starting continuous refresh - lobby will stay alive!");
         
         while (true)
@@ -1169,7 +1221,6 @@ public class LobbyManager : MonoBehaviour
             // Refresh UI
             RefreshTableList();
         }
-        */
     }
 
     /// <summary>
@@ -1178,12 +1229,6 @@ public class LobbyManager : MonoBehaviour
     /// </summary>
     void UpdateTableCountsFromRegistry()
     {
-        // ★ DISABLED FOR NOW - Causes tables to go to 0/9
-        // The issue: TableRegistry isn't properly synced with lobby's initial population
-        // Re-enable when we have proper sync
-        return;
-
-        /*
         var registryTables = TableRegistry.Instance.GetAllTables();
         
         foreach (var regTable in registryTables)
@@ -1207,9 +1252,11 @@ public class LobbyManager : MonoBehaviour
                         if (seat.isOccupied && !string.IsNullOrEmpty(seat.playerName))
                         {
                             // Find player ID by name
-                            var player = AIPlayerManager.Instance.AllPlayers.FirstOrDefault(p => p.PlayerName == seat.playerName);
+                            var player = AIPlayerManager.Instance.GetPlayerByName(seat.playerName);
                             if (player != null)
                             {
+                                player.CurrentTableId = regTable.tableId;
+                                player.UpdateChips(seat.chipCount);
                                 lobbyTable.SeatedPlayerIds.Add(player.PlayerId);
                             }
                         }
@@ -1223,7 +1270,6 @@ public class LobbyManager : MonoBehaviour
                 }
             }
         }
-        */
     }
 
     /// <summary>
@@ -1295,5 +1341,32 @@ public class LobbyManager : MonoBehaviour
         TableRegistry.Instance.UpdateTableState(tableId, tableState);
 
         UnityEngine.Debug.Log($"[Sync] Updated {player.PlayerName} in TableRegistry at seat {seatIndex} (${player.ChipsAtTable:#,0} chips, NOT sitting out)");
+    }
+
+    void RemovePlayerFromTableRegistry(string tableId, string playerName)
+    {
+        var tableState = TableRegistry.Instance.GetTableState(tableId);
+        if (tableState == null)
+        {
+            return;
+        }
+
+        foreach (var seat in tableState.seats)
+        {
+            if (seat.isOccupied && seat.playerName == playerName)
+            {
+                seat.isOccupied = false;
+                seat.playerName = "";
+                seat.chipCount = 0;
+                seat.isSittingOut = false;
+                seat.hasFolded = false;
+                seat.isAllIn = false;
+                seat.currentBet = 0;
+                seat.holeCards.Clear();
+                break;
+            }
+        }
+
+        TableRegistry.Instance.UpdateTableState(tableId, tableState);
     }
 }

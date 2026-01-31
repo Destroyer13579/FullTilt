@@ -80,7 +80,52 @@ public class TableManager : MonoBehaviour
                 UnityEngine.Debug.Log($"[TableManager] Stakes: ${smallBlind}/${bigBlind}");
             }
 
-            if (PlayerPrefs.HasKey("TablePlayerIds"))
+            TableRegistry.Instance.SetTableActivelyRendered(tableId, true);
+
+            TableState registryState = TableRegistry.Instance.GetTableState(tableId);
+
+            if (registryState != null && registryState.seats != null && registryState.seats.Count > 0)
+            {
+                UnityEngine.Debug.Log($"[TableManager] Loading seats from TableRegistry ({registryState.seats.Count} seats)");
+
+                int playersSeated = 0;
+
+                foreach (var seatSnapshot in registryState.seats)
+                {
+                    if (!seatSnapshot.isOccupied || string.IsNullOrEmpty(seatSnapshot.playerName))
+                    {
+                        continue;
+                    }
+
+                    AIPlayer aiPlayer = AIPlayerManager.Instance.GetPlayerByName(seatSnapshot.playerName);
+                    if (aiPlayer == null)
+                    {
+                        UnityEngine.Debug.LogWarning($"[TableManager] Could not find AI player: {seatSnapshot.playerName}");
+                        continue;
+                    }
+
+                    int seatIndex = seatSnapshot.seatIndex;
+                    if (seatIndex < 0 || seatIndex >= seats.Count)
+                    {
+                        continue;
+                    }
+
+                    if (!seats[seatIndex].IsEmpty)
+                    {
+                        continue;
+                    }
+
+                    aiPlayer.UpdateChips(seatSnapshot.chipCount);
+                    aiPlayer.CurrentTableId = tableId;
+
+                    UnityEngine.Debug.Log($"[TableManager]   Seating {aiPlayer.PlayerName} at seat {seatIndex} with ${seatSnapshot.chipCount}, Avatar: {aiPlayer.AvatarId}");
+                    SeatAI(seatIndex, aiPlayer.PlayerName, seatSnapshot.chipCount, aiPlayer.AvatarId);
+                    playersSeated++;
+                }
+
+                UnityEngine.Debug.Log($"[TableManager] Successfully seated {playersSeated} AI players from registry");
+            }
+            else if (PlayerPrefs.HasKey("TablePlayerIds"))
             {
                 string playerIdsStr = PlayerPrefs.GetString("TablePlayerIds");
 
@@ -118,15 +163,10 @@ public class TableManager : MonoBehaviour
                             break;
                         }
 
-                        // Truncate name if too long (max 9 characters to fit on desk)
-                        string displayName = aiPlayer.PlayerName.Length > 9
-                            ? aiPlayer.PlayerName.Substring(0, 9)
-                            : aiPlayer.PlayerName;
+                        UnityEngine.Debug.Log($"[TableManager]   Seating {aiPlayer.PlayerName} at seat {emptySeat} with ${aiPlayer.ChipsAtTable}, Avatar: {aiPlayer.AvatarId}");
 
-                        UnityEngine.Debug.Log($"[TableManager]   Seating {displayName} at seat {emptySeat} with ${aiPlayer.ChipsAtTable}, Avatar: {aiPlayer.AvatarId}");
-
-                        // USE THE PLAYER'S ACTUAL AVATAR ID!
-                        SeatAI(emptySeat, displayName, aiPlayer.ChipsAtTable, aiPlayer.AvatarId);
+                        SeatAI(emptySeat, aiPlayer.PlayerName, aiPlayer.ChipsAtTable, aiPlayer.AvatarId);
+                        aiPlayer.CurrentTableId = tableId;
 
                         playersSeated++;
 
@@ -295,6 +335,8 @@ public class TableManager : MonoBehaviour
         pendingSeat = null;
 
         Debug.Log($"Seated at position {localPlayerSeatIndex} with ${buyInAmount}");
+
+        SyncSeatToRegistry(localPlayerSeatIndex, player.DisplayName, buyInAmount);
     }
 
     void CancelBuyIn()
@@ -321,10 +363,76 @@ public class TableManager : MonoBehaviour
             }
 
             seats[localPlayerSeatIndex].ClearSeat();
+            ClearSeatInRegistry(localPlayerSeatIndex);
             localPlayerSeatIndex = -1;
         }
 
+        if (!string.IsNullOrEmpty(tableId))
+        {
+            TableRegistry.Instance.SetTableActivelyRendered(tableId, false);
+        }
+
         SceneManager.LoadScene("lobby");
+    }
+
+    void OnDestroy()
+    {
+        if (!string.IsNullOrEmpty(tableId))
+        {
+            TableRegistry.Instance.SetTableActivelyRendered(tableId, false);
+        }
+    }
+
+    void SyncSeatToRegistry(int seatIndex, string playerName, int chipCount)
+    {
+        if (string.IsNullOrEmpty(tableId))
+        {
+            return;
+        }
+
+        var tableState = TableRegistry.Instance.GetTableState(tableId);
+        if (tableState == null || seatIndex < 0 || seatIndex >= tableState.seats.Count)
+        {
+            return;
+        }
+
+        var seat = tableState.seats[seatIndex];
+        seat.isOccupied = true;
+        seat.playerName = playerName;
+        seat.chipCount = chipCount;
+        seat.isSittingOut = false;
+        seat.hasFolded = false;
+        seat.isAllIn = false;
+        seat.currentBet = 0;
+        seat.holeCards.Clear();
+
+        TableRegistry.Instance.UpdateTableState(tableId, tableState);
+    }
+
+    void ClearSeatInRegistry(int seatIndex)
+    {
+        if (string.IsNullOrEmpty(tableId))
+        {
+            return;
+        }
+
+        var tableState = TableRegistry.Instance.GetTableState(tableId);
+        if (tableState == null || seatIndex < 0 || seatIndex >= tableState.seats.Count)
+        {
+            return;
+        }
+
+        var seat = tableState.seats[seatIndex];
+        seat.isOccupied = false;
+        seat.playerName = "";
+        seat.chipCount = 0;
+        seat.isSittingOut = false;
+        seat.hasFolded = false;
+        seat.isAllIn = false;
+        seat.currentBet = 0;
+        seat.holeCards.Clear();
+
+        TableRegistry.Instance.UpdateTableState(tableId, tableState);
     }
 
     public void SeatAI(int seatIndex, string name, int chips, int avatarId)

@@ -84,6 +84,9 @@ public class PokerGameManager : MonoBehaviour
     private string savedTableId = "";  // ★ Store table ID before TableManager deletes it!
     private bool loadedFromSnapshot = false;  // ★ Skip dealing cards if loaded from snapshot
     private bool bettingCompleteFromSnapshot = false;  // ★ Skip betting round if complete
+    private float registrySyncInterval = 1f;
+    private float registrySyncTimer = 0f;
+    private int handNumber = 0;
 
     void Start()
     {
@@ -106,6 +109,15 @@ public class PokerGameManager : MonoBehaviour
 
         if (tableManager == null)
             tableManager = FindObjectOfType<TableManager>();
+
+        if (!string.IsNullOrEmpty(savedTableId))
+        {
+            TableState snapshot = TableRegistry.Instance.GetTableState(savedTableId);
+            if (snapshot != null)
+            {
+                handNumber = snapshot.handNumber;
+            }
+        }
 
         // Setup AudioSource for dealing sounds
         audioSource = GetComponent<AudioSource>();
@@ -454,6 +466,7 @@ public class PokerGameManager : MonoBehaviour
     {
         UnityEngine.Debug.Log("=== Starting New Hand ===");
         isHandInProgress = true;
+        handNumber++;
 
         // ★ Process players who joined mid-hand - they can now be dealt in
         TableJoiner joiner = GetComponent<TableJoiner>();
@@ -1672,6 +1685,13 @@ public class PokerGameManager : MonoBehaviour
 
         // Test round-trip - Press 'T' key (Step 3)
         TestRoundTrip();
+
+        registrySyncTimer += Time.deltaTime;
+        if (registrySyncTimer >= registrySyncInterval)
+        {
+            SyncTableStateToRegistry();
+            registrySyncTimer = 0f;
+        }
     }
 
     /// <summary>
@@ -1683,8 +1703,8 @@ public class PokerGameManager : MonoBehaviour
         TableState state = new TableState();
 
         // === BASIC INFO ===
-        state.tableId = gameObject.name;  // Use GameObject name as table ID
-        state.handNumber = 0;  // TODO: Add hand counter later
+        state.tableId = !string.IsNullOrEmpty(tableManager?.tableId) ? tableManager.tableId : savedTableId;
+        state.handNumber = handNumber;
 
         // === DEALER & BLINDS ===
         state.dealerButtonSeat = dealerSeatIndex;
@@ -1695,7 +1715,8 @@ public class PokerGameManager : MonoBehaviour
         state.totalPot = pot;
 
         // === CURRENT STREET ===
-        state.currentStreet = currentState.ToString();  // "PreFlop", "Flop", etc.
+        state.currentStreet = isHandInProgress ? currentState.ToString() : "BetweenHands";  // "PreFlop", "Flop", etc.
+        state.bettingComplete = false;
 
         // === BOARD CARDS ===
         state.boardCards.Clear();
@@ -1761,6 +1782,17 @@ public class PokerGameManager : MonoBehaviour
         return state;
     }
 
+    void SyncTableStateToRegistry()
+    {
+        string tableId = !string.IsNullOrEmpty(tableManager?.tableId) ? tableManager.tableId : savedTableId;
+        if (string.IsNullOrEmpty(tableId))
+        {
+            return;
+        }
+
+        TableRegistry.Instance.UpdateTableState(tableId, Snapshot());
+    }
+
     /// <summary>
     /// Step 3: Apply a snapshot to rebuild the table visuals
     /// This ONLY updates the visuals - doesn't run game logic
@@ -1768,6 +1800,8 @@ public class PokerGameManager : MonoBehaviour
     public void ApplySnapshot(TableState state)
     {
         UnityEngine.Debug.Log($"[ApplySnapshot] Rebuilding table from snapshot: {state.tableId}");
+
+        handNumber = state.handNumber;
 
         // === PREPARE DECK FOR REMAINING CARDS ===
         // ★ CRITICAL: Shuffle deck and remove already-dealt cards!

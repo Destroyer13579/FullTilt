@@ -262,30 +262,9 @@ public class AIPlayerManager
                 UnityEngine.Debug.Log($"  - {whale.PlayerName}: ${whale.Bankroll:#,0}");
             }
 
-            // Clean up any seated players (tables don't persist between sessions)
-            int cleanedUp = 0;
-            foreach (var player in AllPlayers)
-            {
-                if (!string.IsNullOrEmpty(player.CurrentTableId))
-                {
-                    UnityEngine.Debug.LogError($"[Cleanup] Unseating {player.PlayerName} from table {player.CurrentTableId}");
-                    player.LeaveTable();  // Returns chips to bankroll
-                    cleanedUp++;
-                }
-            }
-
-            if (cleanedUp > 0)
-            {
-                UnityEngine.Debug.LogError($"[AIPlayerManager] ✓ Cleared {cleanedUp} seated players (tables don't persist)");
-            }
-            else
-            {
-                UnityEngine.Debug.LogError($"[AIPlayerManager] No seated players to clear");
-            }
-
-            // ★ VERIFY cleanup worked
+            // Preserve seated players for persistent world behavior
             int stillSeated = AllPlayers.Count(p => !string.IsNullOrEmpty(p.CurrentTableId));
-            UnityEngine.Debug.LogError($"[Verify] Players still seated AFTER cleanup: {stillSeated}");
+            UnityEngine.Debug.LogError($"[AIPlayerManager] Persisting seated players: {stillSeated}");
         }
         else
         {
@@ -418,6 +397,11 @@ public class AIPlayerManager
     public AIPlayer GetPlayer(string playerId)
     {
         return AllPlayers.Find(p => p.PlayerId == playerId);
+    }
+
+    public AIPlayer GetPlayerByName(string playerName)
+    {
+        return AllPlayers.Find(p => p.PlayerName == playerName);
     }
 
     /// <summary>
