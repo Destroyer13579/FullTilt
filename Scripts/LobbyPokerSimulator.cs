@@ -54,6 +54,8 @@ public class LobbyPokerSimulator
 
         if (activePlayers.Count < 2)
         {
+            state.currentStreet = "BetweenHands";
+            state.bettingComplete = false;
             return state;  // Not enough players
         }
 
